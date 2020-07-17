@@ -10,6 +10,7 @@ from . import NoneBot
 from .log import logger
 from .natural_language import handle_natural_language
 from .command import handle_command, SwitchException
+from .regexp import handle_regexp
 from .plugin import PluginManager
 
 _message_preprocessors = set()
@@ -32,7 +33,7 @@ class CanceledException(Exception):
         """
         self.reason = reason
 
-
+# 这是接收到消息后的顶层调用函数
 async def handle_message(bot: NoneBot, event: CQEvent) -> None:
     _log_message(event)
 
@@ -40,13 +41,29 @@ async def handle_message(bot: NoneBot, event: CQEvent) -> None:
     if not event.message:
         event.message.append(MessageSegment.text(''))  # type: ignore
 
+    # 检查是否是对我说话
+    # 但不在这里终止，因为还可能是会话未结束。
     raw_to_me = event.get('to_me', False)
     _check_at_me(bot, event)
     _check_calling_me_nickname(bot, event)
     event['to_me'] = raw_to_me or event['to_me']
 
-    coros = []
     plugin_manager = PluginManager()
+    while True:
+        try:
+            handled = await handle_regexp(bot, event, plugin_manager.regexp_manager)
+            break
+        except SwitchException as e:
+            event['message'] = e.new_message
+            event['to_me'] = True
+
+    if handled:
+        logger.info(f'Message {event.message_id} is handled as a regular expression command.')
+        return
+
+
+    # 过一遍预处理器（好像没用到过）
+    coros = []
     for preprocessor in _message_preprocessors:
         coros.append(preprocessor(bot, event, plugin_manager))
     if coros:
@@ -55,6 +72,9 @@ async def handle_message(bot: NoneBot, event: CQEvent) -> None:
         except CanceledException:
             logger.info(f'Message {event["message_id"]} is ignored')
             return
+
+    # 处理命令，如果中途被 Switch 则继续处理。
+    # 此处命令还未被识别
 
     while True:
         try:

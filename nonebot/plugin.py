@@ -17,11 +17,13 @@ from .typing import CommandName_T, CommandHandler_T, Patterns_T
 _tmp_command: Set[Command] = set()
 _tmp_nl_processor: Set[NLProcessor] = set()
 _tmp_event_handler: Set[EventHandler] = set()
+from nonebot.regexp import _tmp_regexp_command
+from nonebot.regexp import RegExpCommandManager
 
 
 class Plugin:
     __slots__ = ('module', 'name', 'usage', 'commands', 'nl_processors',
-                 'event_handlers')
+                 'event_handlers', 'regexp_commands')
 
     def __init__(self,
                  module: ModuleType,
@@ -29,11 +31,13 @@ class Plugin:
                  usage: Optional[Any] = None,
                  commands: Set[Command] = set(),
                  nl_processors: Set[NLProcessor] = set(),
-                 event_handlers: Set[EventHandler] = set()):
+                 event_handlers: Set[EventHandler] = set(),
+                 regexp_commands=set()):
         self.module = module
         self.name = name
         self.usage = usage
         self.commands = commands
+        self.regexp_commands = regexp_commands
         self.nl_processors = nl_processors
         self.event_handlers = event_handlers
 
@@ -44,11 +48,12 @@ class PluginManager:
     def __init__(self):
         self.cmd_manager = CommandManager()
         self.nlp_manager = NLPManager()
+        self.regexp_manager = RegExpCommandManager()
 
     @classmethod
     def add_plugin(cls, module_path: str, plugin: Plugin) -> None:
         """Register a plugin
-        
+
         Args:
             module_path (str): module path
             plugin (Plugin): Plugin object
@@ -61,10 +66,10 @@ class PluginManager:
     @classmethod
     def get_plugin(cls, module_path: str) -> Optional[Plugin]:
         """Get plugin object by plugin module path
-        
+
         Args:
             module_path (str): Plugin module path
-        
+
         Returns:
             Optional[Plugin]: Plugin object
         """
@@ -73,7 +78,7 @@ class PluginManager:
     @classmethod
     def remove_plugin(cls, module_path: str) -> bool:
         """Remove a plugin by plugin module path
-        
+
         ** Warning: This function not remove plugin actually! **
         ** Just remove command, nlprocessor and event handlers **
 
@@ -89,6 +94,8 @@ class PluginManager:
             return False
         for command in plugin.commands:
             CommandManager.remove_command(command.name)
+        for regexp_command in plugin.regexp_commands:
+            RegExpCommandManager.remove_regexp_command(regexp_command)
         for nl_processor in plugin.nl_processors:
             NLPManager.remove_nl_processor(nl_processor)
         for event_handler in plugin.event_handlers:
@@ -102,7 +109,7 @@ class PluginManager:
                              module_path: str,
                              state: Optional[bool] = None) -> None:
         """Change plugin state globally or simply switch it if `state` is None
-        
+
         Args:
             module_path (str): Plugin module path
             state (Optional[bool]): State to change to. Defaults to None.
@@ -128,7 +135,7 @@ class PluginManager:
                               module_path: str,
                               state: Optional[bool] = None) -> None:
         """Change plugin command state globally or simply switch it if `state` is None
-        
+
         Args:
             module_path (str): Plugin module path
             state (Optional[bool]): State to change to. Defaults to None.
@@ -145,7 +152,7 @@ class PluginManager:
                                   module_path: str,
                                   state: Optional[bool] = None) -> None:
         """Change plugin nlprocessor state globally or simply switch it if `state` is None
-        
+
         Args:
             module_path (str): Plugin module path
             state (Optional[bool]): State to change to. Defaults to None.
@@ -162,7 +169,7 @@ class PluginManager:
                                    module_path: str,
                                    state: Optional[bool] = None) -> None:
         """Change plugin event handler state globally or simply switch it if `state` is None
-        
+
         Args:
             module_path (str): Plugin module path
             state (Optional[bool]): State to change to. Defaults to None.
@@ -182,12 +189,12 @@ class PluginManager:
     def switch_plugin(self, module_path: str,
                       state: Optional[bool] = None) -> None:
         """Change plugin state or simply switch it if `state` is None
-        
+
         Tips:
             This method will only change the state of the plugin's
-            commands and natural language processors since change 
+            commands and natural language processors since change
             state of the event handler for message is meaningless.
-        
+
         Args:
             module_path (str): Plugin module path
             state (Optional[bool]): State to change to. Defaults to None.
@@ -204,7 +211,7 @@ class PluginManager:
     def switch_command(self, module_path: str,
                        state: Optional[bool] = None) -> None:
         """Change plugin command state or simply switch it if `state` is None
-        
+
         Args:
             module_path (str): Plugin module path
             state (Optional[bool]): State to change to. Defaults to None.
@@ -219,7 +226,7 @@ class PluginManager:
     def switch_nlprocessor(self, module_path: str,
                            state: Optional[bool] = None) -> None:
         """Change plugin nlprocessor state or simply switch it if `state` is None
-        
+
         Args:
             module_path (str): Plugin module path
             state (Optional[bool]): State to change to. Defaults to None.
@@ -234,15 +241,16 @@ class PluginManager:
 
 def load_plugin(module_path: str) -> Optional[Plugin]:
     """Load a module as a plugin
-    
+
     Args:
         module_path (str): path of module to import
-    
+
     Returns:
         Optional[Plugin]: Plugin object loaded
     """
     # Make sure tmp is clean
     _tmp_command.clear()
+    _tmp_regexp_command.clear()
     _tmp_nl_processor.clear()
     _tmp_event_handler.clear()
     try:
@@ -250,10 +258,11 @@ def load_plugin(module_path: str) -> Optional[Plugin]:
         name = getattr(module, '__plugin_name__', None)
         usage = getattr(module, '__plugin_usage__', None)
         commands = _tmp_command.copy()
+        regexp_commands = _tmp_regexp_command.copy()
         nl_processors = _tmp_nl_processor.copy()
         event_handlers = _tmp_event_handler.copy()
         plugin = Plugin(module, name, usage, commands, nl_processors,
-                        event_handlers)
+                        event_handlers, regexp_commands=regexp_commands)
         PluginManager.add_plugin(module_path, plugin)
         logger.info(f'Succeeded to import "{module_path}"')
         return plugin
@@ -372,6 +381,7 @@ def on_command(name: Union[str, CommandName_T],
         if not name:
             raise ValueError('the name of a command must not be empty')
 
+        # 注意为了支持多级指令，command 的 key 是 tuple。
         cmd_name = (name,) if isinstance(name, str) else name
 
         cmd = Command(name=cmd_name,

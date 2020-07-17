@@ -6,6 +6,11 @@ from aiocqhttp import Event as CQEvent
 from . import NoneBot
 from .exceptions import CQHttpError
 
+# 权限以 bit 方式定义。
+# Command 中权限的要求是任意匹配一个就可以
+# User    中必须把其所有的权限都置 1。
+
+
 PRIVATE_FRIEND = 0x0001
 PRIVATE_GROUP = 0x0002
 PRIVATE_DISCUSS = 0x0004

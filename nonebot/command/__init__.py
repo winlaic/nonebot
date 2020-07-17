@@ -36,6 +36,8 @@ class Command:
         self.privileged = privileged
         self.args_parser_func: Optional[CommandHandler_T] = None
 
+    # 检查权限、处理参数后
+    # 运行回调函数
     async def run(self, session, *, check_perm: bool = True,
                   dry: bool = False) -> bool:
         """
@@ -46,11 +48,14 @@ class Command:
         :param dry: just check any prerequisite, without actually running
         :return: the command is finished (or can be run, given dry == True)
         """
+        # 首先检查权限
         has_perm = await self._check_perm(session) if check_perm else True
         if self.func and has_perm:
             if dry:
                 return True
-
+            # 使用一系列参数过滤器来检查参数合法性
+            # 不合法要求重新输入，超过上线次数终止绘画。
+            # 如果没指定的话就进入 Arg Parser。
             if session.current_arg_filters is not None and \
                     session.current_key is not None:
                 # argument-level filters are given, use them
@@ -98,6 +103,7 @@ class Command:
                     # args_parser_func didn't set state, here we set it
                     session.state[session.current_key] = session.current_arg
 
+            # 终于在这里运行了命令。
             await self.func(session)
             return True
         return False
@@ -130,6 +136,7 @@ class Command:
 
 class CommandManager:
     """Global Command Manager"""
+    # commands 的 key 以 tuple 形式存储。
     _commands = {}  # type: Dict[CommandName_T, Command]
     _aliases = {}  # type: Dict[str, Command]
     _switches = {}  # type: Dict[Command, bool]
@@ -144,7 +151,7 @@ class CommandManager:
     @classmethod
     def add_command(cls, cmd_name: CommandName_T, cmd: Command) -> None:
         """Register a command
-        
+
         Args:
             cmd_name (CommandName_T): Command name
             cmd (Command): Command object
@@ -155,12 +162,13 @@ class CommandManager:
         cls._switches[cmd] = True
         cls._commands[cmd_name] = cmd
 
+    # 这个方法也从来没用过。
     @classmethod
     def reload_command(cls, cmd_name: CommandName_T, cmd: Command) -> None:
         """Reload a command
-        
+
         **Warning! Dangerous function**
-        
+
         Args:
             cmd_name (CommandName_T): Command name
             cmd (Command): Command object
@@ -181,12 +189,12 @@ class CommandManager:
     @classmethod
     def remove_command(cls, cmd_name: CommandName_T) -> bool:
         """Remove a command
-        
+
         **Warning! Dangerous function**
-        
+
         Args:
             cmd_name (CommandName_T): Command name to remove
-        
+
         Returns:
             bool: Success or not
         """
@@ -207,7 +215,7 @@ class CommandManager:
                               cmd_name: CommandName_T,
                               state: Optional[bool] = None):
         """Change command state globally or simply switch it if `state` is None
-        
+
         Args:
             cmd_name (CommandName_T): Command name
             state (Optional[bool]): State to change to. Defaults to None.
@@ -219,7 +227,7 @@ class CommandManager:
     @classmethod
     def add_aliases(cls, aliases: Union[Iterable[str], str], cmd: Command):
         """Register command alias(es)
-        
+
         Args:
             aliases (Union[Iterable[str], str]): Command aliases
             cmd_name (Command): Command
@@ -260,7 +268,7 @@ class CommandManager:
     def _add_command_to_tree(self, cmd_name: CommandName_T, cmd: Command,
                              tree: Dict[str, Union[Dict, Command]]) -> None:
         """Add command to the target command tree.
-        
+
         Args:
             cmd_name (CommandName_T): Name of the command
             cmd (Command): Command object
@@ -279,13 +287,14 @@ class CommandManager:
             return
         current_parent[cmd_name[-1]] = cmd
 
+    # 意义不明的函数，没有在任何地方用过。
     def _generate_command_tree(self, commands: Dict[CommandName_T, Command]
                               ) -> Dict[str, Union[Dict, Command]]:
         """Generate command tree from commands dictionary.
-        
+
         Args:
             commands (Dict[CommandName_T, Command]): Dictionary of commands
-        
+
         Returns:
             Dict[str, Union[Dict, "Command"]]: Command tree
         """
@@ -314,6 +323,8 @@ class CommandManager:
 
         # cmd = cmd_tree.get(cmd_name[-1])  # type: ignore
         # return cmd if isinstance(cmd, Command) else None
+
+        # 在开启的命令中查找 cmd。默认为开启。
         cmd = {
             name: cmd
             for name, cmd in self.commands.items()
@@ -321,11 +332,13 @@ class CommandManager:
         }.get(cmd_name)
         return cmd
 
+    # Raw 的指令第一个经过这里。
     def parse_command(self, bot: NoneBot, cmd_string: str
                      ) -> Tuple[Optional[Command], Optional[str]]:
         logger.debug(f'Parsing command: {repr(cmd_string)}')
 
-        matched_start = None
+        # 检查命令是否有开始标记
+        matched_start = NoneØ
         for start in bot.config.COMMAND_START:
             # loop through COMMAND_START to find the longest matched start
             curr_matched_start = None
@@ -350,14 +363,20 @@ class CommandManager:
 
         logger.debug(f'Matched command start: '
                      f'{matched_start}{"(empty)" if not matched_start else ""}')
+
+        # 去掉命令的开始标记
         full_command = cmd_string[len(matched_start):].lstrip()
 
         if not full_command:
             # command is empty
             return None, None
 
+        # 这里写死了命令和参数的分割符是空格
+        # 而且仅仅处理第一个空格，剩下的参数一并进入 cmd_remained。
+        #（不明白这里装包的意义何在。。。）
         cmd_name_text, *cmd_remained = full_command.split(maxsplit=1)
 
+        # 将多级命令拆分放入 cmd_name 这个 tuple 中
         cmd_name = None
         for sep in bot.config.COMMAND_SEP:
             # loop through COMMAND_SEP to find the most optimized split
@@ -376,6 +395,7 @@ class CommandManager:
             cmd_name = (cmd_name_text,)
         logger.debug(f'Split command name: {cmd_name}')
 
+        # 在开启的命令中查找命令的实例。
         cmd = self._find_command(cmd_name)  # type: ignore
         if not cmd:
             logger.debug(f'Command {cmd_name} not found. Try to match aliases')
@@ -405,13 +425,16 @@ class CommandManager:
             return None, None
 
         logger.debug(f'Command {cmd.name} found, function: {cmd.func}')
+
+        # 这里又join回去了。。
+        # 白瞎一次装包
         return cmd, ''.join(cmd_remained)
 
     def switch_command(self,
                        cmd_name: CommandName_T,
                        state: Optional[bool] = None):
         """Change command state or simply switch it if `state` is None
-        
+
         Args:
             cmd_name (CommandName_T): Command name
             state (Optional[bool]): State to change to. Defaults to None.
@@ -421,7 +444,7 @@ class CommandManager:
             state)
 
 
-class _PauseException(Exception):
+class PauseException(Exception):
     """
     Raised by session.pause() indicating that the command session
     should be paused to ask the user for some arguments.
@@ -429,7 +452,7 @@ class _PauseException(Exception):
     pass
 
 
-class _FinishException(Exception):
+class FinishException(Exception):
     """
     Raised by session.finish() indicating that the command session
     should be stopped and removed.
@@ -497,6 +520,7 @@ class CommandSession(BaseSession):
         if args:
             self._state.update(args)
 
+        # 上一次 running 被设置为 False 的时间。
         self._last_interaction = None  # last interaction time of this session
         self._running = False
 
@@ -624,13 +648,13 @@ class CommandSession(BaseSession):
         """Pause the session for further interaction."""
         if message:
             self._run_future(self.send(message, **kwargs))
-        raise _PauseException
+        raise PauseException
 
     def finish(self, message: Optional[Message_T] = None, **kwargs) -> None:
         """Finish the session."""
         if message:
             self._run_future(self.send(message, **kwargs))
-        raise _FinishException
+        raise FinishException
 
     def switch(self, new_message: Message_T) -> None:
         """
@@ -645,13 +669,19 @@ class CommandSession(BaseSession):
         if self.is_first_run:
             # if calling this method during first run,
             # we think the command is not handled
-            raise _FinishException(result=False)
+            raise FinishException(result=False)
 
         if not isinstance(new_message, Message):
             new_message = Message(new_message)
         raise SwitchException(new_message)
 
 
+
+# 尝试解析命令
+# 语句是否和自己相关
+# 看看之前的 Session 有没有没过期的
+# 没有的话新建一个，有的话不检查权限直接继续。
+# 出口：_real_run_command
 async def handle_command(bot: NoneBot, event: CQEvent,
                          manager: CommandManager) -> Optional[bool]:
     """
@@ -664,7 +694,9 @@ async def handle_command(bot: NoneBot, event: CQEvent,
     :param manager: command manager
     :return: the message is handled as a command
     """
+    # 尝试从字符中解析出对应的命令。
     cmd, current_arg = manager.parse_command(bot, str(event.message).lstrip())
+
     is_privileged_cmd = cmd and cmd.privileged
     if is_privileged_cmd and cmd.only_to_me and not event['to_me']:
         is_privileged_cmd = False
@@ -673,8 +705,11 @@ async def handle_command(bot: NoneBot, event: CQEvent,
     if is_privileged_cmd:
         logger.debug(f'Command {cmd.name} is a privileged command')
 
+    # Context 指的是（对话发起人，对话环境）形成的哈希索引。
     ctx_id = context_id(event)
 
+    # 这里防止命令还未执行完毕就开启新命令。
+    # 如果不是特殊命令，等待1.5秒。
     if not is_privileged_cmd:
         # wait for 1.5 seconds (at most) if the current session is running
         retry = 5
@@ -686,6 +721,8 @@ async def handle_command(bot: NoneBot, event: CQEvent,
     check_perm = True
     session = _sessions.get(ctx_id) if not is_privileged_cmd else None
     if session:
+
+        # 这里防止命令还未执行完毕就开启新命令。
         if session.running:
             logger.warning(f'There is a session of command '
                            f'{session.cmd.name} running, notify the user')
@@ -695,13 +732,18 @@ async def handle_command(bot: NoneBot, event: CQEvent,
             # pretend we are successful, so that NLP won't handle it
             return True
 
+        # 不 running 的 Sessoion 是被挂起的。
+        # is_valid 检查会话时间是否超过 config.SESSION_EXPIRE_TIMEOUT
+        # 如果 Session 还有效，即便是没找到 Command 也直接传入
         if session.is_valid:
             logger.debug(f'Session of command {session.cmd.name} exists')
-            # since it's in a session, the user must be talking to me
+            # 因为 Session 还没过期，即使命令中没有AT我也是对我说的。
             event['to_me'] = True
             session.refresh(event, current_arg=str(event['message']))
             # there is no need to check permission for existing session
             check_perm = False
+
+        # 超过时间就删掉这个 Session
         else:
             # the session is expired, remove it
             logger.debug(f'Session of command {session.cmd.name} is expired')
@@ -719,12 +761,14 @@ async def handle_command(bot: NoneBot, event: CQEvent,
         session = CommandSession(bot, event, cmd, current_arg=current_arg)
         logger.debug(f'New session of command {session.cmd.name} created')
 
+    # 检查完 command 有效或者 Session 还在的情况，运行指令。
     return await _real_run_command(session,
                                    ctx_id,
                                    check_perm=check_perm,
                                    disable_interaction=disable_interaction)
 
 
+# 这个命令只在
 async def call_command(bot: NoneBot,
                        event: CQEvent,
                        name: Union[str, CommandName_T],
@@ -766,6 +810,10 @@ async def call_command(bot: NoneBot,
                                    check_perm=check_perm,
                                    disable_interaction=disable_interaction)
 
+# 设置 sessoin 为 Running
+# 调用 Command 中的 run()
+# 处理命令中发生的异常：挂起、切换、超时等
+# 出口：command.run()
 
 async def _real_run_command(session: CommandSession,
                             ctx_id: str,
@@ -783,19 +831,24 @@ async def _real_run_command(session: CommandSession,
             timeout = session.bot.config.SESSION_RUN_TIMEOUT.total_seconds()
 
         try:
+            # 设置超时，运行命令。
             await asyncio.wait_for(future, timeout)
             handled = future.result()
         except asyncio.TimeoutError:
             handled = True
-        except (_PauseException, _FinishException, SwitchException) as e:
+        except (PauseException, FinishException, SwitchException) as e:
             raise e
         except Exception as e:
             logger.error(f'An exception occurred while '
                          f'running command {session.cmd.name}:')
             logger.exception(e)
             handled = True
-        raise _FinishException(handled)
-    except _PauseException:
+
+        # 命令正常执行完成抛出完成异常。
+        raise FinishException(handled)
+
+    # 如果命令被暂停，则 running 为 False 但是不删除 Session；
+    except PauseException:
         session.running = False
         if disable_interaction:
             # if the command needs further interaction, we view it as failed
@@ -804,7 +857,8 @@ async def _real_run_command(session: CommandSession,
                      f'command {session.cmd.name}')
         # return True because this step of the session is successful
         return True
-    except (_FinishException, SwitchException) as e:
+    # 如果命令被完成或者切换，则删除 Session。
+    except (FinishException, SwitchException) as e:
         session.running = False
         logger.debug(f'Session of command {session.cmd.name} finished')
         if not disable_interaction and ctx_id in _sessions:
@@ -813,7 +867,7 @@ async def _real_run_command(session: CommandSession,
             # we leave the _sessions untouched.
             del _sessions[ctx_id]
 
-        if isinstance(e, _FinishException):
+        if isinstance(e, FinishException):
             return e.result
         elif isinstance(e, SwitchException):
             # we are guaranteed that the session is not first run here,
