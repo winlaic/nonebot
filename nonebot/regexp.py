@@ -10,7 +10,7 @@ from nonebot import NoneBot
 from nonebot.command import PauseException, FinishException, SwitchException
 from nonebot.helpers import context_id, render_expression
 from nonebot.log import logger
-from nonebot.permission import check_permission
+from nonebot.permission import check_permission, EVERYBODY
 from nonebot.session import BaseSession
 from nonebot.typing import *
 
@@ -38,6 +38,10 @@ class RegExpCommand:
     @property
     def privileged(self):
         return self._privileged
+    
+    @property
+    def only_to_me(self):
+        return self._only_to_me
 
     async def run(self, session, *, check_perm: bool = True, dry: bool = False):
         has_perm = await self._check_perm(session) if check_perm else True
@@ -156,11 +160,11 @@ class RegExpCommandManager:
         else:
             raise TypeError
         cls._regexps[exp] = regexp_command
-        cls.true = True
-        cls._switches[regexp_command] = cls.true
+        cls._switches[regexp_command] = True
 
     def __init__(self):
         self._regexps = RegExpCommandManager._regexps.copy()
+        self._switches = RegExpCommandManager._switches.copy()
 
     def parse_regexp_command(self, bot: NoneBot, string: str):
         for exp, regexp_command in self._regexps.items():
@@ -183,7 +187,7 @@ class RegExpCommandManager:
 async def handle_regexp(bot: NoneBot, event: CQEvent,
                         manager: RegExpCommandManager) -> Optional[bool]:
     # 尝试从字符中解析出对应的命令。
-    regexp_command, initial_arguments = manager.parse_regexp_command(bot, event.message)
+    regexp_command, initial_arguments = manager.parse_regexp_command(bot, str(event.message))
 
     is_privileged_cmd = regexp_command and regexp_command.privileged
     if is_privileged_cmd and regexp_command.only_to_me and not event['to_me']:
@@ -333,7 +337,7 @@ def on_regexp(exp: Union[str, re.Pattern],
               *,
               only_to_me: bool = True,
               privileged: bool = False,
-              permission: int) -> Callable:
+              permission: int = EVERYBODY) -> Callable:
     def deco(func: CommandHandler_T) -> CommandHandler_T:
         regexp_cmd = RegExpCommand(func=func, only_to_me=only_to_me, privileged=privileged, permission=permission)
         RegExpCommandManager.add_regexp_command(exp, regexp_cmd)

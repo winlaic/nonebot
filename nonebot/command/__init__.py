@@ -338,7 +338,7 @@ class CommandManager:
         logger.debug(f'Parsing command: {repr(cmd_string)}')
 
         # 检查命令是否有开始标记
-        matched_start = NoneØ
+        matched_start = None
         for start in bot.config.COMMAND_START:
             # loop through COMMAND_START to find the longest matched start
             curr_matched_start = None
